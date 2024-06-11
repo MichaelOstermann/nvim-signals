@@ -1,0 +1,402 @@
+*nvim-signals.txt*        For Neovim >= 0.8.0        Last change: 2024 June 11
+
+==============================================================================
+Table of Contents                             *nvim-signals-table-of-contents*
+
+1. Usage                                                  |nvim-signals-usage|
+2. API                                                      |nvim-signals-api|
+3. Notes                                                  |nvim-signals-notes|
+  - Garbage Collection                 |nvim-signals-notes-garbage-collection|
+
+
+==============================================================================
+1. Usage                                                  *nvim-signals-usage*
+
+There are two ways provided to start using signals, pick whichever you prefer:
+
+>lua
+    local s = require("signals")
+    
+    s.signal
+    s.computed
+    s.effect
+<
+
+>lua
+    local signal = require("signals.signal")
+    local computed = require("signals.computed")
+    local effect = require("signals.effect")
+<
+
+
+==============================================================================
+2. API                                                      *nvim-signals-api*
+
+
+SIGNAL() ~
+
+Creates a new signal.
+
+>lua
+    local signal = require("signals.signal")
+    
+    local example = signal(0)
+<
+
+
+SIGNAL:GET() ~
+
+Retrieves the current value of a signal.
+
+Signals accessed this way will be added to the dependencies of the current
+computed or effect, if any. Use `signal:peek()` or `untracked()` if you would
+like to avoid this behaviour.
+
+>lua
+    local signal = require("signals.signal")
+    
+    local example = signal(0)
+    
+    -- 0
+    print(example:get())
+<
+
+
+SIGNAL:PEEK() ~
+
+Like `signal:get()`, but will not become a dependency of effects or computeds.
+
+>lua
+    local signal = require("signals.signal")
+    
+    local example = signal(0)
+    
+    -- 0
+    print(example:peek())
+<
+
+
+SIGNAL:SET() ~
+
+Updates the current value of a signal. If the value changed (`==`), dependent
+computeds will get marked as dirty and effects will get scheduled for
+execution.
+
+>lua
+    local signal = require("signals.signal")
+    
+    local example = signal(0)
+    
+    -- Effects and computeds using this signal will be informed about the change.
+    example:set(1)
+    
+    -- 1
+    print(example:get())
+    
+    -- The value did not change, so this has no side-effects.
+    example:set(1)
+<
+
+
+SIGNAL:IS() ~
+
+An alias for `signal:get() == value`.
+
+>lua
+    local signal = require("signals.signal")
+    
+    local example = signal(0)
+    
+    -- true
+    print(example:is(0))
+    -- false
+    print(example:is(1))
+<
+
+
+SIGNAL:MAP() ~
+
+An alias for `signal:set(fn(signal:peek()))`.
+
+>lua
+    local signal = require("signals.signal")
+    
+    local example = signal(0)
+    
+    example:map(function(value)
+        return value + 1
+    end)
+    
+    -- 1
+    print(example:get())
+<
+
+
+COMPUTED() ~
+
+Creates a new computed, allowing you to combine the values of signals and other
+computeds.
+
+>lua
+    local signal = require("signals.signal")
+    local computed = require("signals.computed")
+    
+    local a = signal(1)
+    local b = signal(2)
+    
+    local example = computed(function()
+        return a:get() + b:get()
+    end)
+<
+
+
+COMPUTED:GET() ~
+
+Retrieves the current value of a computed. This will cause the computation to
+refresh if its dependencies have changed since last time, otherwise the cached
+result is returned.
+
+Computeds accessed this way will be added to the dependencies of the parent
+computed or current effect, if any. Use `computed:peek()` or `untracked()` if
+you would like to avoid this behaviour.
+
+>lua
+    local signal = require("signals.signal")
+    local computed = require("signals.computed")
+    
+    local a = signal(1)
+    local b = signal(2)
+    
+    local example = computed(function()
+        return a:get() + b:get()
+    end)
+    
+    -- 3
+    print(example:get())
+<
+
+
+COMPUTED:PEEK() ~
+
+Like `computed:get()`, but will not become a dependency of effects or
+computeds.
+
+>lua
+    local signal = require("signals.signal")
+    local computed = require("signals.computed")
+    
+    local a = signal(1)
+    local b = signal(2)
+    
+    local example = computed(function()
+        return a:get() + b:get()
+    end)
+    
+    -- 3
+    print(example:peek())
+<
+
+
+COMPUTED:IS() ~
+
+An alias for `computed:get() == value`.
+
+>lua
+    local signal = require("signals.signal")
+    local computed = require("signals.computed")
+    
+    local a = signal(1)
+    local b = signal(2)
+    
+    local example = computed(function()
+        return a:get() + b:get()
+    end)
+    
+    -- true
+    print(example:is(3))
+    -- false
+    print(example:is(4))
+<
+
+
+EFFECT() ~
+
+Creates a new effect, allowing you to react to changes made to signals or
+computeds.
+
+>lua
+    local signal = require("signals.signal")
+    local effect = require("signals.effect")
+    
+    local a = signal(1)
+    
+    effect(function()
+        print(a:get())
+    end)
+<
+
+
+EFFECT:DISPOSE() ~
+
+Stops the effect from observing signals, allowing it to be garbage collected.
+
+>lua
+    local signal = require("signals.signal")
+    local effect = require("signals.effect")
+    
+    local a = signal(1)
+    
+    local example = effect(function()
+        print(a:get())
+    end)
+    
+    example:dispose()
+<
+
+
+BATCH() ~
+
+Allows you to batch multiple signal updates into a single one.
+
+Note that it is not necessary to use `batch` inside effects!
+
+>lua
+    local signal = require("signals.signal")
+    local batch = require("signals.batch")
+    
+    local a = signal(0)
+    local b = signal(0)
+    
+    local result = batch(function()
+        a:set(1)
+        b:set(1)
+        return a:get() + b:get()
+    end)
+    
+    -- 2
+    print(result)
+<
+
+
+BATCH_WRAP() ~
+
+Takes a function and decorates it with `batch()`, similar to
+`vim.schedule_wrap`.
+
+>lua
+    local signal = require("signals.signal")
+    local batch_wrap = require("signals.batch_wrap")
+    
+    local a = signal(0)
+    local b = signal(0)
+    
+    local shippit = batch_wrap(function(left, right)
+        a:set(left)
+        b:set(right)
+        return a:get() + b:get()
+    end)
+    
+    -- 2
+    print(shippit(1, 1))
+<
+
+
+UNTRACKED() ~
+
+Prevents signals and computeds accessed within the provided function to get
+added as dependencies to the current computed or effect, if any.
+
+>lua
+    local signal = require("signals.signal")
+    local effect = require("signals.effect")
+    local untracked = require("signals.untracked")
+    
+    local a = signal(1)
+    local b = signal(1)
+    
+    effect(function()
+        print(a:get())
+        
+        local result = untracked(function()
+            return a:get() + b:get()
+        end)
+        
+        print(result)
+    end)
+    
+    -- Prints 2 and 3
+    a:set(2)
+    
+    -- Effect does not react
+    b:set(2)
+    
+    -- Prints 3 and 5
+    a:set(3)
+<
+
+
+UNTRACKED_WRAP() ~
+
+Takes a function and decorates it with `untracked()`, similar to
+`vim.schedule_wrap`.
+
+>lua
+    local signal = require("signals.signal")
+    local effect = require("signals.effect")
+    local untracked_wrap = require("signals.untracked_wrap")
+    
+    local a = signal(1)
+    local b = signal(1)
+    
+    local example = untracked_wrap(function(value)
+        return value + b:get()
+    end)
+    
+    effect(function()
+        print(a:get())
+        print(example(a:get()))
+    end)
+    
+    -- Prints 2 and 3
+    a:set(2)
+    
+    -- Effect does not react
+    b:set(2)
+    
+    -- Prints 3 and 5
+    a:set(3)
+<
+
+
+==============================================================================
+3. Notes                                                  *nvim-signals-notes*
+
+
+GARBAGE COLLECTION                     *nvim-signals-notes-garbage-collection*
+
+Any signal implementation has to implement something that at least somewhat
+resembles a graph data-structure. Some bookkeeping has to be done by
+maintaining references to signals, computeds and effects, in order to be able
+to determine dependencies and dependents.
+
+Both dependencies and dependents are stored in weak tables
+<https://www.lua.org/pil/17.html>. This means that signals, and more
+importantly computeds, will get garbage collected once they become unreachable,
+otherwise they are retained in memory forever.
+
+If you are storing signals or computeds somewhere, for example in tables to be
+able to relate them to specific buffers/windows, please take care to
+dereference them when no longer needed.
+
+Effects are stored internally in a table, to prevent them from being
+immediately garbage collected. This means that effects live forever, and most
+definitely will keep references to signals and other computeds, preventing any
+them from being cleaned up.
+
+Any effect that is no longer needed has to be removed by calling
+`effect:dispose()`, which will allow them to be garbage collected, including
+their dependencies if they became unreachable.
+
+Generated by panvimdoc <https://github.com/kdheepak/panvimdoc>
+
+vim:tw=78:ts=8:noet:ft=help:norl:
